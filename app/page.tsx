@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Topbar } from '@/components/layout/topbar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DollarSign, TrendingUp, Users, AlertTriangle, Clock, Calendar, ArrowRight, Loader2, CheckSquare } from 'lucide-react'
-import { format, differenceInDays } from 'date-fns'
+import { format, differenceInDays, startOfDay, parseISO } from 'date-fns'
 import Link from 'next/link'
 
 interface Deal {
@@ -96,14 +96,12 @@ export default function DashboardPage() {
     return differenceInDays(new Date(), updated) > 14 && d.stage !== 'close_won'
   })
 
-  // Upcoming approach end dates (next 30 days, non-won/loss)
+  // Upcoming event dates (all future, non-won/loss)
+  const today = startOfDay(new Date())
   const upcomingApproach = deals
     .filter(d => d.approachEndDate && !['close_won', 'close_loss'].includes(d.stage))
-    .filter(d => {
-      const diff = differenceInDays(new Date(d.approachEndDate!), new Date())
-      return diff >= 0 && diff <= 30
-    })
-    .sort((a, b) => new Date(a.approachEndDate!).getTime() - new Date(b.approachEndDate!).getTime())
+    .filter(d => differenceInDays(startOfDay(parseISO(d.approachEndDate!)), today) >= 0)
+    .sort((a, b) => parseISO(a.approachEndDate!).getTime() - parseISO(b.approachEndDate!).getTime())
     .slice(0, 6)
 
   // Pipeline by stage (funnel)
@@ -223,14 +221,14 @@ export default function DashboardPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-slate-400" />
-                    Approach End Dates
+                    Event Dates
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {upcomingApproach.length === 0 ? (
                     <p className="text-xs text-slate-400">No upcoming approach deadlines.</p>
                   ) : upcomingApproach.map(deal => {
-                    const daysUntil = differenceInDays(new Date(deal.approachEndDate!), new Date())
+                    const daysUntil = differenceInDays(startOfDay(parseISO(deal.approachEndDate!)), today)
                     const urgent = daysUntil <= 7
                     return (
                       <div key={deal.id} className="flex items-start justify-between hover:bg-slate-50 rounded-lg p-2 -mx-2 transition-colors">
@@ -244,7 +242,7 @@ export default function DashboardPage() {
                           )}
                         </div>
                         <div className="text-right ml-2 shrink-0">
-                          <p className="text-xs font-medium text-slate-700">{format(new Date(deal.approachEndDate!), 'MMM d')}</p>
+                          <p className="text-xs font-medium text-slate-700">{format(parseISO(deal.approachEndDate!), 'MMM d')}</p>
                           <p className={`text-xs font-medium ${urgent ? 'text-red-500' : 'text-slate-400'}`}>
                             {daysUntil === 0 ? 'Today' : `${daysUntil}d`}
                           </p>

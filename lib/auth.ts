@@ -26,6 +26,18 @@ export function getToken(): string | null {
   return getCookie(TOKEN_COOKIE)
 }
 
+// Decode JWT payload (client-side, no library needed)
+export function getClientUserInfo(): { email: string; name: string; color: string } | null {
+  const token = getCookie(TOKEN_COOKIE)
+  if (!token) return null
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return { email: payload.email, name: payload.name, color: payload.color }
+  } catch {
+    return null
+  }
+}
+
 export async function loginWithBackend(email: string, password: string): Promise<{ name: string; color: string }> {
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',

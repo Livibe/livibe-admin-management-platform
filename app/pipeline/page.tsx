@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  DndContext, DragEndEvent, DragOverlay, DragStartEvent,
+  DndContext, DragEndEvent,
   useDroppable, useDraggable, PointerSensor, useSensor, useSensors,
 } from '@dnd-kit/core'
 import { Topbar } from '@/components/layout/topbar'
@@ -175,7 +175,7 @@ function daysUntil(dateStr?: string): number | null {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
-const EMPTY_FORM = { eventName: '', clientName: '', dealValue: '', approachEndDate: '', createdBy: '', note: '' }
+const EMPTY_FORM = { eventName: '', clientName: '', dealValue: '', eventDate: '', createdBy: '', note: '' }
 
 // ── Card action menu (portal to escape overflow) ───────────────────────────
 function CardMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
@@ -271,7 +271,6 @@ function DealCard({
       <p className="text-xs text-slate-400 mt-0.5">{deal.clientName}</p>
       <div className="flex items-center justify-between mt-2">
         <span className="text-sm font-bold text-slate-900">{formatUSD(Number(deal.dealValue))}</span>
-        <span className="text-xs text-slate-400">{deal.probability}%</span>
       </div>
       {days !== null && (
         <div className="mt-2">
@@ -287,9 +286,12 @@ function DealCard({
       {(deal.createdBy || deal.note) && (
         <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
           {deal.createdBy && (
-            <p className="text-xs text-slate-400">
-              Assigned To: <span className="font-medium text-slate-600 capitalize">{deal.createdBy}</span>
-            </p>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${AVATAR_COLORS[deal.createdBy] ?? 'bg-slate-400'}`}>
+                {deal.createdBy.charAt(0).toUpperCase()}
+              </span>
+              <span className="text-xs text-slate-500 capitalize">{deal.createdBy}</span>
+            </div>
           )}
           {deal.note && <p className="text-xs text-slate-400 line-clamp-2 italic">{deal.note}</p>}
         </div>
@@ -308,7 +310,10 @@ function DraggableCard({
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: deal.id })
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={isDragging ? 'opacity-30' : ''}>
+    <div ref={setNodeRef} style={style} {...listeners} {...attributes}
+      className={isDragging ? 'opacity-30' : ''}
+      onClick={() => onEdit()}
+    >
       <DealCard deal={deal} onEdit={onEdit} onDelete={onDelete} />
     </div>
   )
@@ -323,6 +328,94 @@ function DroppableColumn({ stage, children }: { stage: DealStage; children: Reac
   )
 }
 
+// ── Filter select (custom portal dropdown) ────────────────────────────────────
+function FilterSelect({
+  value, onChange, options, placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string; avatar?: boolean }[]
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const selected = options.find(o => o.value === value)
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  function handleOpen() {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 180) })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={handleOpen}
+        className={`flex items-center gap-1.5 pl-3 pr-2 py-2 text-sm border rounded-lg transition-all cursor-pointer bg-white ${value ? 'border-violet-400 text-violet-700 bg-violet-50' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+      >
+        {selected?.avatar && (
+          <span className={`w-4 h-4 rounded-full ${AVATAR_COLORS[selected.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[9px] font-bold shrink-0`}>
+            {selected.label.charAt(0)}
+          </span>
+        )}
+        <span className="text-xs font-medium">{selected ? selected.label : placeholder}</span>
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: pos.width, zIndex: 9999 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden py-1"
+        >
+          <button
+            type="button"
+            onMouseDown={() => { onChange(''); setOpen(false) }}
+            className="w-full flex items-center px-3 py-2 text-xs text-slate-400 hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            {placeholder}
+          </button>
+          <div className="h-px bg-slate-100 mx-3 mb-1" />
+          {options.map(o => (
+            <button
+              key={o.value}
+              type="button"
+              onMouseDown={() => { onChange(o.value); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors cursor-pointer ${value === o.value ? 'bg-violet-50 text-violet-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}
+            >
+              {o.avatar && (
+                <span className={`w-5 h-5 rounded-full ${AVATAR_COLORS[o.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}>
+                  {o.label.charAt(0)}
+                </span>
+              )}
+              {o.label}
+              {value === o.value && <span className="ml-auto text-violet-500">✓</span>}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function PipelinePage() {
   const [deals, setDeals]   = useState<Deal[]>([])
@@ -330,17 +423,20 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(true)
   const [error, setError]   = useState<string | null>(null)
 
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const activeDeal = deals.find(d => d.id === activeId) ?? null
 
   const [modalStage, setModalStage] = useState<DealStage | null>(null)
   const [editDeal, setEditDeal]     = useState<Deal | null>(null)
   const [deleteId, setDeleteId]     = useState<string | null>(null)
 
+  const [filterCompany, setFilterCompany] = useState('')
+  const [filterAssignee, setFilterAssignee] = useState('')
+
   const [form, setForm]           = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError]   = useState<string | null>(null)
   const [showClientList, setShowClientList] = useState(false)
+  const [clientListPos, setClientListPos] = useState({ top: 0, left: 0, width: 0 })
+  const clientInputRef = useRef<HTMLDivElement>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
@@ -366,7 +462,6 @@ export default function PipelinePage() {
 
   useEffect(() => { fetchDeals(); fetchClients() }, [fetchDeals, fetchClients])
 
-  function handleDragStart(e: DragStartEvent) { setActiveId(e.active.id as string) }
 
   async function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e
@@ -398,7 +493,7 @@ export default function PipelinePage() {
       eventName: deal.eventName,
       clientName: deal.clientName,
       dealValue: String(deal.dealValue),
-      approachEndDate: deal.approachEndDate ?? '',
+      eventDate: deal.approachEndDate ?? '',
       createdBy: deal.createdBy ?? '',
       note: deal.note ?? '',
     })
@@ -408,9 +503,9 @@ export default function PipelinePage() {
   function closeModal() { setModalStage(null); setEditDeal(null) }
   function setField(key: keyof typeof EMPTY_FORM, value: string) { setForm(f => ({ ...f, [key]: value })) }
 
-  const filteredClients = clients
-    .filter(c => c.companyName.toLowerCase().includes(form.clientName.toLowerCase()))
-    .slice(0, 6)
+  const filteredClients = form.clientName.trim()
+    ? clients.filter(c => c.companyName.toLowerCase().includes(form.clientName.toLowerCase()))
+    : clients
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -420,7 +515,7 @@ export default function PipelinePage() {
       eventName:       form.eventName.trim(),
       clientName:      form.clientName.trim(),
       dealValue:       form.dealValue ? parseFloat(form.dealValue) : 0,
-      approachEndDate: form.approachEndDate || undefined,
+      approachEndDate: form.eventDate || undefined,
       stage:           editDeal ? undefined : modalStage,
       createdBy:       form.createdBy || undefined,
       note:            form.note.trim() || undefined,
@@ -455,7 +550,7 @@ export default function PipelinePage() {
       'Company':           d.clientName,
       'Deal Value (THB)':  d.dealValue,
       'Stage':             STAGE_LABELS[d.stage as DealStage] ?? d.stage,
-      'Approach End Date': d.approachEndDate ?? '',
+      'Event Date':        d.approachEndDate ?? '',
       'Assigned To':       d.createdBy ?? '',
       'Note':              d.note ?? '',
       'Created At':        new Date(d.createdAt).toLocaleDateString(),
@@ -477,7 +572,27 @@ export default function PipelinePage() {
     <div>
       <Topbar title="Pipeline" />
       <div className="p-6">
-        <div className="flex justify-end mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <FilterSelect
+              value={filterCompany}
+              onChange={setFilterCompany}
+              placeholder="All Companies"
+              options={Array.from(new Set(deals.map(d => d.clientName).filter(Boolean))).sort().map(name => ({ value: name, label: name }))}
+            />
+            <FilterSelect
+              value={filterAssignee}
+              onChange={setFilterAssignee}
+              placeholder="All Assignees"
+              options={ASSIGNEE_OPTIONS.map(o => ({ ...o, avatar: true }))}
+            />
+            {(filterCompany || filterAssignee) && (
+              <button onClick={() => { setFilterCompany(''); setFilterAssignee('') }}
+                className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5 cursor-pointer">
+                Clear
+              </button>
+            )}
+          </div>
           <button onClick={exportCSV} disabled={deals.length === 0}
             className="flex items-center gap-1.5 text-sm font-medium text-slate-600 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
             <Download className="w-4 h-4" /> Export CSV
@@ -491,11 +606,15 @@ export default function PipelinePage() {
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
         ) : (
-          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="overflow-x-auto">
+          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <div className="flex gap-3 min-w-max pb-4">
                 {STAGES.map(stage => {
-                  const stageDeals = deals.filter(d => d.stage === stage)
+                  const stageDeals = deals.filter(d =>
+                    d.stage === stage &&
+                    (!filterCompany || d.clientName === filterCompany) &&
+                    (!filterAssignee || d.createdBy === filterAssignee)
+                  )
                   const stageValue = stageDeals.reduce((s, d) => s + Number(d.dealValue), 0)
                   const colors     = STAGE_COLORS[stage]
                   const isClosed   = stage === 'close_won' || stage === 'close_loss'
@@ -529,7 +648,7 @@ export default function PipelinePage() {
                         {stageDeals.length === 0 && !isClosed && (
                           <button onClick={() => openCreate(stage)} className="w-full border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-violet-300 hover:bg-violet-50/30 transition-colors cursor-pointer">
                             <Plus className="w-4 h-4 text-slate-300 mx-auto mb-1" />
-                            <p className="text-xs text-slate-400">Add first deal</p>
+                            <p className="text-xs text-slate-400">Add</p>
                           </button>
                         )}
                         {stageDeals.length === 0 && isClosed && (
@@ -543,20 +662,17 @@ export default function PipelinePage() {
                 })}
               </div>
             </div>
-            <DragOverlay dropAnimation={null}>
-              {activeDeal && <DealCard deal={activeDeal} ghost />}
-            </DragOverlay>
           </DndContext>
         )}
       </div>
 
       {/* Create / Edit Deal Modal */}
       {modalStage && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={closeModal}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
               <div>
-                <h2 className="text-sm font-semibold text-slate-900">{editDeal ? 'Edit Deal' : 'New Deal'}</h2>
+                <h2 className="text-sm font-semibold text-slate-900">{editDeal ? 'Edit Card' : 'New Card'}</h2>
                 <span className={`text-xs px-2 py-0.5 rounded-full mt-1 inline-block ${STAGE_COLORS[modalStage].badge}`}>
                   {STAGE_LABELS[modalStage]}
                 </span>
@@ -566,73 +682,96 @@ export default function PipelinePage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Event Name <span className="text-red-500">*</span></label>
-                <input type="text" required value={form.eventName} onChange={e => setField('eventName', e.target.value)} placeholder="e.g. Summer Sonic 2026" className={inputCls} />
-              </div>
-
-              {/* Company autocomplete */}
-              <div className="relative">
-                <label className="block text-xs font-medium text-slate-700 mb-1">Company <span className="text-red-500">*</span></label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={form.clientName}
-                    onChange={e => { setField('clientName', e.target.value); setShowClientList(true) }}
-                    onFocus={() => setShowClientList(true)}
-                    onBlur={() => setTimeout(() => setShowClientList(false), 150)}
-                    placeholder="Type to search or enter new..."
-                    className={inputCls + ' pr-8'}
-                  />
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
-                </div>
-                {showClientList && filteredClients.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-                    {filteredClients.map(c => (
-                      <button key={c.id} type="button"
-                        onMouseDown={() => { setField('clientName', c.companyName); setShowClientList(false) }}
-                        className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors cursor-pointer">
-                        {c.companyName}
-                      </button>
-                    ))}
+            <form onSubmit={handleSubmit} className="p-5">
+              <div className="flex flex-col md:flex-row gap-5">
+                {/* Left column */}
+                <div className="flex-1 space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Event Name <span className="text-red-500">*</span></label>
+                    <input type="text" required value={form.eventName} onChange={e => setField('eventName', e.target.value)} placeholder="e.g. Summer Sonic 2026" className={inputCls} />
                   </div>
-                )}
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Deal Value (THB)</label>
-                  <input type="number" min="0" step="0.01" value={form.dealValue} onChange={e => setField('dealValue', e.target.value)} placeholder="0" className={inputCls} />
+                  {/* Company autocomplete */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Company <span className="text-red-500">*</span></label>
+                    <div className="relative" ref={clientInputRef}>
+                      <input
+                        type="text"
+                        required
+                        value={form.clientName}
+                        onChange={e => {
+                          setField('clientName', e.target.value)
+                          if (clientInputRef.current) {
+                            const r = clientInputRef.current.getBoundingClientRect()
+                            setClientListPos({ top: r.bottom + 4, left: r.left, width: r.width })
+                          }
+                          setShowClientList(true)
+                        }}
+                        onFocus={() => {
+                          if (clientInputRef.current) {
+                            const r = clientInputRef.current.getBoundingClientRect()
+                            setClientListPos({ top: r.bottom + 4, left: r.left, width: r.width })
+                          }
+                          setShowClientList(true)
+                        }}
+                        onBlur={() => setTimeout(() => setShowClientList(false), 150)}
+                        placeholder="Type to search or enter new..."
+                        className={inputCls + ' pr-8'}
+                      />
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                    </div>
+                    {showClientList && filteredClients.length > 0 && createPortal(
+                      <div style={{ position: 'fixed', top: clientListPos.top, left: clientListPos.left, width: clientListPos.width, zIndex: 9999 }}
+                        className="bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                        {filteredClients.map(c => (
+                          <button key={c.id} type="button"
+                            onMouseDown={() => { setField('clientName', c.companyName); setShowClientList(false) }}
+                            className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700 transition-colors cursor-pointer">
+                            {c.companyName}
+                          </button>
+                        ))}
+                      </div>,
+                      document.body
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Deal Value (THB)</label>
+                      <input type="number" min="0" step="0.01" value={form.dealValue} onChange={e => setField('dealValue', e.target.value)} placeholder="0" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Event Date</label>
+                      <input type="date" value={form.eventDate} onChange={e => setField('eventDate', e.target.value)} className={inputCls} />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Approach End Date</label>
-                  <input type="date" value={form.approachEndDate} onChange={e => setField('approachEndDate', e.target.value)} className={inputCls} />
+
+                {/* Divider */}
+                <div className="hidden md:block w-px bg-slate-100 self-stretch" />
+
+                {/* Right column */}
+                <div className="md:w-52 space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Assigned To</label>
+                    <AvatarSelect value={form.createdBy} onChange={v => setField('createdBy', v)} options={ASSIGNEE_OPTIONS} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Note</label>
+                    <textarea value={form.note} onChange={e => setField('note', e.target.value)} placeholder="Any notes..." rows={5} className={`${inputCls} resize-none`} />
+                  </div>
                 </div>
               </div>
 
-              {/* Assigned To */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Assigned To</label>
-                <AvatarSelect value={form.createdBy} onChange={v => setField('createdBy', v)} options={ASSIGNEE_OPTIONS} />
-              </div>
+              {formError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2 mt-4">{formError}</p>}
 
-              {/* Note */}
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">Note</label>
-                <textarea value={form.note} onChange={e => setField('note', e.target.value)} placeholder="Any notes..." rows={2} className={`${inputCls} resize-none`} />
-              </div>
-
-              {formError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{formError}</p>}
-
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2 pt-4 mt-4 border-t border-slate-100">
                 <button type="button" onClick={closeModal} className="flex-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg px-4 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer">
                   Cancel
                 </button>
                 <button type="submit" disabled={submitting} className="flex-1 text-sm font-medium text-white bg-violet-600 rounded-lg px-4 py-2.5 hover:bg-violet-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                   {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {editDeal ? 'Save Changes' : 'Create Deal'}
+                  {editDeal ? 'Save Changes' : 'Create Card'}
                 </button>
               </div>
             </form>

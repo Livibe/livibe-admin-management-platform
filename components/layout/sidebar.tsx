@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { LayoutDashboard, Users, Kanban, CheckSquare, BarChart2, Settings, Zap, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getClientUser, logout, USERS } from "@/lib/auth"
+import { getClientUserInfo, logout } from "@/lib/auth"
 
 const nav = [
   { label: "Dashboard", href: "/",         icon: LayoutDashboard },
@@ -16,13 +16,13 @@ const nav = [
   { label: "Settings",  href: "/settings", icon: Settings },
 ]
 
-export function Sidebar() {
+export function Sidebar({ isOpen, onClose }: { isOpen?: boolean; onClose?: () => void }) {
   const pathname  = usePathname()
   const router    = useRouter()
-  const [username, setUsername] = useState<string | null>(null)
+  const [userInfo, setUserInfo] = useState<{ email: string; name: string; color: string } | null>(null)
 
   useEffect(() => {
-    setUsername(getClientUser())
+    setUserInfo(getClientUserInfo())
   }, [])
 
   function handleLogout() {
@@ -31,10 +31,8 @@ export function Sidebar() {
     router.refresh()
   }
 
-  const userInfo = username ? USERS[username] : null
-
   return (
-    <aside className="fixed inset-y-0 left-0 w-60 bg-slate-900 flex flex-col z-40">
+    <aside className={`fixed inset-y-0 left-0 w-60 bg-slate-900 flex flex-col z-40 transition-transform duration-200 ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
       {/* Logo */}
       <div className="flex items-center gap-2 px-6 py-5 border-b border-slate-800">
         <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center">
@@ -51,7 +49,7 @@ export function Sidebar() {
         {nav.map(({ label, href, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href)
           return (
-            <Link key={href} href={href} className={cn(
+            <Link key={href} href={href} onClick={onClose} className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
               active ? "bg-violet-600 text-white" : "text-slate-400 hover:text-white hover:bg-slate-800"
             )}>
@@ -70,10 +68,10 @@ export function Sidebar() {
               "w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0",
               userInfo?.color ?? "bg-slate-600"
             )}>
-              {userInfo ? userInfo.label.charAt(0).toUpperCase() : '?'}
+              {userInfo?.name.charAt(0).toUpperCase() ?? '?'}
             </div>
             <div className="min-w-0">
-              <p className="text-white text-xs font-medium truncate">{userInfo?.label ?? '—'}</p>
+              <p className="text-white text-xs font-medium truncate">{userInfo?.name ?? '—'}</p>
               <p className="text-slate-400 text-xs">Sales</p>
             </div>
           </div>

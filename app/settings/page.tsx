@@ -1,60 +1,65 @@
-import { Topbar } from "@/components/layout/topbar"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { users } from "@/lib/mock-data"
-import { Upload, RefreshCw, Users } from "lucide-react"
+'use client'
+
+import { useEffect, useState } from 'react'
+import { Topbar } from '@/components/layout/topbar'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Users, Loader2 } from 'lucide-react'
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+
+const AVATAR_COLORS: Record<string, string> = {
+  'bg-violet-500': 'bg-violet-500',
+  'bg-blue-500':   'bg-blue-500',
+  'bg-amber-400':  'bg-amber-400',
+}
+
+interface TeamUser {
+  email: string
+  name: string
+  color: string
+}
 
 export default function SettingsPage() {
+  const [teamUsers, setTeamUsers] = useState<TeamUser[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch(`${API_URL}/auth/users`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setTeamUsers)
+      .finally(() => setLoading(false))
+  }, [])
+
   return (
     <div>
       <Topbar title="Settings" />
-      <div className="p-6 space-y-5 max-w-3xl">
+      <div className="p-6 max-w-3xl">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4" />Team Members</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Users className="w-4 h-4" /> Team Members
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {users.map(user => (
-                <div key={user.id} className="flex items-center justify-between p-3 rounded-lg border bg-slate-50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-sm font-bold">
-                      {user.name.split(' ').map(n => n[0]).join('')}
+            {loading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {teamUsers.map(user => (
+                  <div key={user.email} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${AVATAR_COLORS[user.color] ?? 'bg-slate-500'}`}>
+                      {user.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <p className="text-sm font-medium text-slate-900">{user.name}</p>
                       <p className="text-xs text-slate-400">{user.email}</p>
                     </div>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 font-medium capitalize">{user.role}</span>
-                </div>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="mt-4">+ Invite Team Member</Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2"><Upload className="w-4 h-4" />Import from Google Sheets</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-slate-500">Upload a CSV export from your Google Sheets customer list, or connect directly via Google Sheets API.</p>
-            <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center">
-              <Upload className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm font-medium text-slate-600">Drop CSV file here or click to upload</p>
-              <p className="text-xs text-slate-400 mt-1">Supports: Company, Contact, Email, Phone, Country, Industry, Status</p>
-              <Button variant="outline" size="sm" className="mt-4">Choose File</Button>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-slate-200" />
-              <span className="text-xs text-slate-400">or</span>
-              <div className="flex-1 h-px bg-slate-200" />
-            </div>
-            <Button variant="outline" className="w-full gap-2">
-              <RefreshCw className="w-4 h-4" />
-              Connect Google Sheets
-            </Button>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

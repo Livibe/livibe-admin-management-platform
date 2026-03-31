@@ -57,7 +57,7 @@ export default function LoginPage() {
                 autoComplete="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="e.g. japan@livibe.co"
+                placeholder=""
                 className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2.5 outline-none placeholder:text-slate-600 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 transition-all"
               />
             </div>

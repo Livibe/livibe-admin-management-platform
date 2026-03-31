@@ -4,8 +4,8 @@ import { Input } from "@/components/ui/input"
 
 export function Topbar({ title }: { title: string }) {
   return (
-    <header className="h-14 border-b bg-white flex items-center justify-between px-6">
-      <h1 className="font-semibold text-slate-900">{title}</h1>
+    <header className="h-14 border-b border-slate-100 bg-white flex items-center justify-between px-6">
+      <h1 className="font-semibold text-slate-900 pl-8 md:pl-0">{title}</h1>
       <div className="flex items-center gap-3">
         <div className="relative w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
