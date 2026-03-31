@@ -6,8 +6,8 @@ interface PipelineChartProps {
 }
 
 function formatUSD(n: number) {
-  if (n >= 1000) return `$${(n / 1000).toFixed(0)}K`
-  return `$${n}`
+  if (n >= 1000) return `฿${(n / 1000).toFixed(0)}K`
+  return `฿${n}`
 }
 
 export function PipelineChart({ data }: PipelineChartProps) {

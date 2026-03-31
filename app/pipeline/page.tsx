@@ -3,9 +3,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  DndContext, DragEndEvent,
-  useDroppable, useDraggable, PointerSensor, useSensor, useSensors,
+  DndContext, DragEndEvent, DragOverEvent, DragOverlay,
+  useDroppable, PointerSensor, useSensor, useSensors,
+  closestCenter, pointerWithin,
 } from '@dnd-kit/core'
+import {
+  SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Topbar } from '@/components/layout/topbar'
 import { Plus, X, Loader2, GripVertical, ChevronDown, MoreHorizontal, Pencil, Trash2, Download } from 'lucide-react'
 
@@ -28,6 +33,7 @@ interface Deal {
   approachEndDate?: string
   note?: string
   createdBy?: string
+  order?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -164,9 +170,9 @@ function AvatarSelect({
 }
 
 function formatUSD(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1000)      return `$${(n / 1000).toFixed(0)}K`
-  return `$${n}`
+  if (n >= 1_000_000) return `฿${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000)      return `฿${(n / 1000).toFixed(0)}K`
+  return `฿${n}`
 }
 
 function daysUntil(dateStr?: string): number | null {
@@ -262,13 +268,13 @@ function DealCard({
         : 'border-slate-200 hover:shadow-md hover:border-slate-300 cursor-grab active:cursor-grabbing'
     }`}>
       <div className="flex items-start justify-between gap-1">
-        <p className="text-xs font-semibold text-slate-900 leading-tight flex-1">{deal.eventName}</p>
+        <p className="text-xs font-semibold text-slate-900 leading-tight flex-1">{deal.clientName}</p>
         {!ghost && onEdit && onDelete
           ? <CardMenu onEdit={onEdit} onDelete={onDelete} />
           : <GripVertical className="w-3 h-3 text-slate-300 shrink-0 mt-0.5" />
         }
       </div>
-      <p className="text-xs text-slate-400 mt-0.5">{deal.clientName}</p>
+      {deal.eventName && <p className="text-xs text-slate-400 mt-0.5">{deal.eventName}</p>}
       <div className="flex items-center justify-between mt-2">
         <span className="text-sm font-bold text-slate-900">{formatUSD(Number(deal.dealValue))}</span>
       </div>
@@ -307,12 +313,35 @@ function DraggableCard({
   onEdit: () => void
   onDelete: () => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: deal.id })
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: deal.id })
+  const startPos = useRef({ x: 0, y: 0 })
+  const wasDragged = useRef(false)
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  const { onPointerDown: dndPointerDown, ...restListeners } = listeners ?? {}
+
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}
-      className={isDragging ? 'opacity-30' : ''}
-      onClick={() => onEdit()}
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...restListeners}
+      className={isDragging ? 'opacity-0' : ''}
+      onPointerDown={e => {
+        startPos.current = { x: e.clientX, y: e.clientY }
+        wasDragged.current = false
+        dndPointerDown?.(e)
+      }}
+      onPointerMove={e => {
+        const dx = e.clientX - startPos.current.x
+        const dy = e.clientY - startPos.current.y
+        if (Math.sqrt(dx * dx + dy * dy) > 8) wasDragged.current = true
+      }}
+      onClick={() => { if (!wasDragged.current) onEdit() }}
     >
       <DealCard deal={deal} onEdit={onEdit} onDelete={onDelete} />
     </div>
@@ -322,7 +351,7 @@ function DraggableCard({
 function DroppableColumn({ stage, children }: { stage: DealStage; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage })
   return (
-    <div ref={setNodeRef} className={`space-y-2 min-h-24 rounded-xl p-1 -m-1 transition-colors ${isOver ? 'bg-violet-50/60' : ''}`}>
+    <div ref={setNodeRef} className={`space-y-2 flex-1 rounded-xl p-1 -m-1 transition-colors ${isOver ? 'bg-violet-50/60' : ''}`}>
       {children}
     </div>
   )
@@ -428,7 +457,9 @@ export default function PipelinePage() {
   const [editDeal, setEditDeal]     = useState<Deal | null>(null)
   const [deleteId, setDeleteId]     = useState<string | null>(null)
 
-  const [filterCompany, setFilterCompany] = useState('')
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const dealsBeforeDrag = useRef<Deal[]>([])
+
   const [filterAssignee, setFilterAssignee] = useState('')
 
   const [form, setForm]           = useState(EMPTY_FORM)
@@ -463,23 +494,81 @@ export default function PipelinePage() {
   useEffect(() => { fetchDeals(); fetchClients() }, [fetchDeals, fetchClients])
 
 
-  async function handleDragEnd(e: DragEndEvent) {
+  function handleDragStart(e: { active: { id: string | number } }) {
+    setActiveId(e.active.id as string)
+    dealsBeforeDrag.current = deals
+  }
+
+  function handleDragOver(e: DragOverEvent) {
     const { active, over } = e
-    setActiveId(null)
     if (!over) return
-    const dealId   = active.id as string
-    const newStage = over.id as DealStage
-    const deal     = deals.find(d => d.id === dealId)
-    if (!deal || deal.stage === newStage) return
-    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: newStage } : d))
-    try {
-      const res = await fetch(`${API_URL}/deals/${dealId}`, {
+
+    const dealId = active.id as string
+    const overId = over.id as string
+    const overIsStage = (STAGES as string[]).includes(overId)
+    const targetStage = overIsStage
+      ? (overId as DealStage)
+      : (deals.find(d => d.id === overId)?.stage)
+
+    if (!targetStage) return
+
+    setDeals(prev => {
+      const activeDeal = prev.find(d => d.id === dealId)
+      if (!activeDeal) return prev
+
+      // Move card to new column if needed
+      const updated = activeDeal.stage !== targetStage
+        ? prev.map(d => d.id === dealId ? { ...d, stage: targetStage } : d)
+        : prev
+
+      // Reorder within target column
+      if (!overIsStage) {
+        const colDeals  = updated.filter(d => d.stage === targetStage)
+        const rest      = updated.filter(d => d.stage !== targetStage)
+        const activeIdx = colDeals.findIndex(d => d.id === dealId)
+        const overIdx   = colDeals.findIndex(d => d.id === overId)
+        if (activeIdx !== -1 && overIdx !== -1 && activeIdx !== overIdx) {
+          return [...rest, ...arrayMove(colDeals, activeIdx, overIdx)]
+        }
+        return [...rest, ...colDeals]
+      }
+      return updated
+    })
+  }
+
+  async function handleDragEnd(e: DragEndEvent) {
+    setActiveId(null)
+    const { active, over } = e
+
+    if (!over) {
+      // Cancelled — restore original
+      setDeals(dealsBeforeDrag.current)
+      return
+    }
+
+    const dealId      = active.id as string
+    const finalDeal   = deals.find(d => d.id === dealId)
+    const beforeDeal  = dealsBeforeDrag.current.find(d => d.id === dealId)
+    if (!finalDeal || !beforeDeal) return
+
+    const stageChanged = finalDeal.stage !== beforeDeal.stage
+
+    // Persist order for all cards in the affected column(s)
+    const colDeals = deals.filter(d => d.stage === finalDeal.stage)
+    colDeals.forEach((d, i) => {
+      const body: Record<string, unknown> = { order: i }
+      if (d.id === dealId && stageChanged) body.stage = finalDeal.stage
+      fetch(`${API_URL}/deals/${d.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stage: newStage }),
+        body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error()
-    } catch { fetchDeals() }
+    })
+  }
+
+  function handleDragCancel() {
+    setActiveId(null)
+    setDeals(dealsBeforeDrag.current)
   }
 
   function openCreate(stage: DealStage) {
@@ -518,7 +607,7 @@ export default function PipelinePage() {
       approachEndDate: form.eventDate || undefined,
       stage:           editDeal ? undefined : modalStage,
       createdBy:       form.createdBy || undefined,
-      note:            form.note.trim() || undefined,
+      note:            editDeal ? form.note.trim() : (form.note.trim() || undefined),
     }
     try {
       const url    = editDeal ? `${API_URL}/deals/${editDeal.id}` : `${API_URL}/deals`
@@ -532,7 +621,25 @@ export default function PipelinePage() {
         const b = await res.json().catch(() => ({}))
         throw new Error(b.message || 'Failed')
       }
-      closeModal(); await fetchDeals()
+      const saved = await res.json()
+      closeModal()
+      await fetchDeals()
+
+      if (!editDeal && saved?.id) {
+        // Put new card at the top of its column and persist order
+        setDeals(prev => {
+          const stage    = saved.stage as DealStage
+          const colDeals = prev.filter(d => d.stage === stage)
+          const rest     = prev.filter(d => d.stage !== stage)
+          const newFirst = [colDeals.find(d => d.id === saved.id)!, ...colDeals.filter(d => d.id !== saved.id)].filter(Boolean)
+          newFirst.forEach((d, i) => fetch(`${API_URL}/deals/${d.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: i }),
+          }))
+          return [...rest, ...newFirst]
+        })
+      }
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Something went wrong')
     } finally { setSubmitting(false) }
@@ -569,25 +676,19 @@ export default function PipelinePage() {
   const inputCls = "w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400 transition-all placeholder:text-slate-300"
 
   return (
-    <div>
+    <div className="flex flex-col min-h-screen">
       <Topbar title="Pipeline" />
-      <div className="p-6">
+      <div className="flex flex-col p-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
-            <FilterSelect
-              value={filterCompany}
-              onChange={setFilterCompany}
-              placeholder="All Companies"
-              options={Array.from(new Set(deals.map(d => d.clientName).filter(Boolean))).sort().map(name => ({ value: name, label: name }))}
-            />
             <FilterSelect
               value={filterAssignee}
               onChange={setFilterAssignee}
               placeholder="All Assignees"
               options={ASSIGNEE_OPTIONS.map(o => ({ ...o, avatar: true }))}
             />
-            {(filterCompany || filterAssignee) && (
-              <button onClick={() => { setFilterCompany(''); setFilterAssignee('') }}
+            {filterAssignee && (
+              <button onClick={() => setFilterAssignee('')}
                 className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5 cursor-pointer">
                 Clear
               </button>
@@ -606,13 +707,19 @@ export default function PipelinePage() {
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
         ) : (
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={args => pointerWithin(args).length > 0 ? pointerWithin(args) : closestCenter(args)}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
             <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               <div className="flex gap-3 min-w-max pb-4">
                 {STAGES.map(stage => {
                   const stageDeals = deals.filter(d =>
                     d.stage === stage &&
-                    (!filterCompany || d.clientName === filterCompany) &&
                     (!filterAssignee || d.createdBy === filterAssignee)
                   )
                   const stageValue = stageDeals.reduce((s, d) => s + Number(d.dealValue), 0)
@@ -620,7 +727,7 @@ export default function PipelinePage() {
                   const isClosed   = stage === 'close_won' || stage === 'close_loss'
 
                   return (
-                    <div key={stage} className="w-64 shrink-0">
+                    <div key={stage} className="w-64 shrink-0 flex flex-col self-stretch">
                       <div className="flex items-center justify-between mb-3 px-1">
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${colors.dot}`} />
@@ -637,6 +744,7 @@ export default function PipelinePage() {
                       </div>
 
                       <DroppableColumn stage={stage}>
+                        <SortableContext items={stageDeals.map(d => d.id)} strategy={verticalListSortingStrategy}>
                         {stageDeals.map(deal => (
                           <DraggableCard
                             key={deal.id}
@@ -645,6 +753,7 @@ export default function PipelinePage() {
                             onDelete={() => setDeleteId(deal.id)}
                           />
                         ))}
+                        </SortableContext>
                         {stageDeals.length === 0 && !isClosed && (
                           <button onClick={() => openCreate(stage)} className="w-full border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-violet-300 hover:bg-violet-50/30 transition-colors cursor-pointer">
                             <Plus className="w-4 h-4 text-slate-300 mx-auto mb-1" />
@@ -662,6 +771,11 @@ export default function PipelinePage() {
                 })}
               </div>
             </div>
+            <DragOverlay dropAnimation={null}>
+              {activeId ? (
+                <DealCard deal={deals.find(d => d.id === activeId)!} ghost />
+              ) : null}
+            </DragOverlay>
           </DndContext>
         )}
       </div>
@@ -686,12 +800,7 @@ export default function PipelinePage() {
               <div className="flex flex-col md:flex-row gap-5">
                 {/* Left column */}
                 <div className="flex-1 space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">Event Name <span className="text-red-500">*</span></label>
-                    <input type="text" required value={form.eventName} onChange={e => setField('eventName', e.target.value)} placeholder="e.g. Summer Sonic 2026" className={inputCls} />
-                  </div>
-
-                  {/* Company autocomplete */}
+                  {/* Company autocomplete — first field */}
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">Company <span className="text-red-500">*</span></label>
                     <div className="relative" ref={clientInputRef}>
@@ -733,6 +842,11 @@ export default function PipelinePage() {
                       </div>,
                       document.body
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Event Name <span className="text-xs font-normal text-slate-400">(optional)</span></label>
+                    <input type="text" value={form.eventName} onChange={e => setField('eventName', e.target.value)} placeholder="e.g. Summer Sonic 2026" className={inputCls} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

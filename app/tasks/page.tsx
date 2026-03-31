@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Topbar } from '@/components/layout/topbar'
 import { Plus, X, Loader2, CheckSquare, Square, AlertTriangle, Pencil, Trash2, RefreshCw, Calendar, Clock, Inbox, ChevronDown } from 'lucide-react'
-import { format, isToday, isBefore, differenceInDays, parseISO, startOfDay, isAfter } from 'date-fns'
+import { format, isToday, isBefore, differenceInDays, parseISO, startOfDay } from 'date-fns'
 
 interface Task {
   id: string
@@ -45,14 +45,87 @@ const EMPTY_FORM = {
   title: '', description: '', dueDate: '', priority: 'medium', assignedTo: 'muan', repeat: 'none',
 }
 
+// ── Filter select ─────────────────────────────────────────────────────────────
+function FilterSelect({
+  value, onChange, options, placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const selected = options.find(o => o.value === value)
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  function handleOpen() {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 160) })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      <button ref={btnRef} type="button" onClick={handleOpen}
+        className={`flex items-center gap-1.5 pl-3 pr-2 py-2 text-sm border rounded-lg transition-all cursor-pointer bg-white ${value ? 'border-violet-400 text-violet-700 bg-violet-50' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+        {selected && (
+          <span className={`w-4 h-4 rounded-full ${AVATAR_COLORS[selected.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[9px] font-bold shrink-0`}>
+            {selected.label.charAt(0)}
+          </span>
+        )}
+        <span className="text-xs font-medium">{selected ? selected.label : placeholder}</span>
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div ref={menuRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, minWidth: pos.width, zIndex: 9999 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden py-1">
+          <button type="button" onMouseDown={() => { onChange(''); setOpen(false) }}
+            className="w-full flex items-center px-3 py-2 text-xs text-slate-400 hover:bg-slate-50 transition-colors cursor-pointer">
+            {placeholder}
+          </button>
+          <div className="h-px bg-slate-100 mx-3 mb-1" />
+          {options.map(o => (
+            <button key={o.value} type="button" onMouseDown={() => { onChange(o.value); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors cursor-pointer ${value === o.value ? 'bg-violet-50 text-violet-700 font-medium' : 'text-slate-700 hover:bg-slate-50'}`}>
+              <span className={`w-5 h-5 rounded-full ${AVATAR_COLORS[o.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}>
+                {o.label.charAt(0)}
+              </span>
+              {o.label}
+              {value === o.value && <span className="ml-auto text-violet-500">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 // ── Task row ──────────────────────────────────────────────────────────────────
 function TaskRow({
-  task, onToggle, onEdit, onDelete,
+  task, onToggle, onEdit, onDelete, fullDate = false, canToggle = false,
 }: {
   task: Task
   onToggle: () => void
   onEdit: () => void
   onDelete: () => void
+  fullDate?: boolean
+  canToggle?: boolean
 }) {
   const isDone    = task.status === 'done'
   const isOverdue = task.status === 'overdue' || (
@@ -62,13 +135,17 @@ function TaskRow({
 
   return (
     <div className={`flex items-start gap-3 px-4 py-3 group hover:bg-slate-50 transition-colors ${isDone ? 'opacity-60' : ''}`}>
-      {/* Checkbox */}
-      <button onClick={onToggle} className="mt-0.5 shrink-0 cursor-pointer">
-        {isDone
-          ? <CheckSquare className="w-4 h-4 text-violet-500" />
-          : <Square className="w-4 h-4 text-slate-300 hover:text-slate-400 transition-colors" />
-        }
-      </button>
+      {/* Checkbox — only shown for today's tasks and done tasks */}
+      {canToggle ? (
+        <button onClick={onToggle} className="mt-0.5 shrink-0 cursor-pointer">
+          {isDone
+            ? <CheckSquare className="w-4 h-4 text-violet-500" />
+            : <Square className="w-4 h-4 text-slate-300 hover:text-slate-400 transition-colors" />
+          }
+        </button>
+      ) : (
+        <div className="mt-0.5 w-4 shrink-0" />
+      )}
 
       {/* Content */}
       <div className="flex-1 min-w-0">
@@ -100,7 +177,7 @@ function TaskRow({
         <span className={`w-1.5 h-1.5 rounded-full ${pCfg.dot}`} />
         {task.dueDate && (
           <span className={`text-xs font-medium ${isOverdue && !isDone ? 'text-red-500' : 'text-slate-400'}`}>
-            {format(parseISO(task.dueDate), 'MMM d')}
+            {format(parseISO(task.dueDate), fullDate ? 'EEE, MMM d' : 'MMM d')}
           </span>
         )}
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -118,7 +195,7 @@ function TaskRow({
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 function Section({
-  icon, title, count, accent, children, collapsible = false,
+  icon, title, count, accent, children, collapsible = false, alwaysShow = false,
 }: {
   icon: React.ReactNode
   title: string
@@ -126,9 +203,10 @@ function Section({
   accent: string
   children: React.ReactNode
   collapsible?: boolean
+  alwaysShow?: boolean
 }) {
   const [open, setOpen] = useState(true)
-  if (count === 0) return null
+  if (count === 0 && !alwaysShow) return null
   return (
     <div>
       <button
@@ -158,6 +236,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [filterAssignee, setFilterAssignee] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editTask, setEditTask] = useState<Task | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -239,20 +318,21 @@ export default function TasksPage() {
 
   // ── Partition tasks ──────────────────────────────────────────────────────
   const todayStart = startOfDay(new Date())
+  const filtered  = filterAssignee ? tasks.filter(t => t.assignedTo === filterAssignee) : tasks
 
-  const overdue   = tasks.filter(t => t.status !== 'done' && t.dueDate && isBefore(parseISO(t.dueDate), todayStart))
-  const todayList = tasks.filter(t => t.status !== 'done' && t.dueDate && isToday(parseISO(t.dueDate)))
-  const thisWeek  = tasks.filter(t => {
+  const overdue   = filtered.filter(t => t.status !== 'done' && t.dueDate && isBefore(parseISO(t.dueDate), todayStart))
+  const todayList = filtered.filter(t => t.status !== 'done' && t.dueDate && isToday(parseISO(t.dueDate)))
+  const thisWeek  = filtered.filter(t => {
     if (t.status === 'done' || !t.dueDate) return false
     const diff = differenceInDays(parseISO(t.dueDate), todayStart)
     return diff > 0 && diff <= 7
   })
-  const upcoming  = tasks.filter(t => {
+  const upcoming  = filtered.filter(t => {
     if (t.status === 'done' || !t.dueDate) return false
     return differenceInDays(parseISO(t.dueDate), todayStart) > 7
   })
-  const noDate    = tasks.filter(t => t.status !== 'done' && !t.dueDate)
-  const done      = tasks.filter(t => t.status === 'done')
+  const noDate    = filtered.filter(t => t.status !== 'done' && !t.dueDate)
+  const done      = filtered.filter(t => t.status === 'done')
 
   const activePending = overdue.length + todayList.length + thisWeek.length + upcoming.length + noDate.length
 
@@ -265,11 +345,19 @@ export default function TasksPage() {
 
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-slate-400">{format(new Date(), 'EEEE, MMMM d')}</p>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {loading ? '—' : activePending === 0 ? 'All caught up!' : `${activePending} task${activePending !== 1 ? 's' : ''} remaining`}
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="text-xs text-slate-400">{format(new Date(), 'EEEE, MMMM d')}</p>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {loading ? '—' : activePending === 0 ? 'All caught up!' : `${activePending} task${activePending !== 1 ? 's' : ''} remaining`}
+              </p>
+            </div>
+            <FilterSelect
+              value={filterAssignee}
+              onChange={setFilterAssignee}
+              placeholder="All Members"
+              options={ASSIGNEE_OPTIONS}
+            />
           </div>
           <button onClick={openCreate}
             className="flex items-center gap-1.5 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700 px-3 py-2 rounded-lg transition-colors cursor-pointer">
@@ -296,15 +384,18 @@ export default function TasksPage() {
             {/* Overdue */}
             <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} title="Overdue" count={overdue.length} accent="text-red-600">
               {overdue.map(task => (
-                <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
+                <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} canToggle={false} />
               ))}
             </Section>
 
             {/* Today */}
-            <Section icon={<Calendar className="w-3.5 h-3.5" />} title={`Today — ${format(new Date(), 'MMM d')}`} count={todayList.length} accent="text-violet-600">
-              {todayList.map(task => (
-                <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
-              ))}
+            <Section icon={<Calendar className="w-3.5 h-3.5" />} title={`Today — ${format(new Date(), 'MMM d')}`} count={todayList.length} accent="text-violet-600" alwaysShow>
+              {todayList.length === 0
+                ? <div className="px-4 py-4 text-xs text-slate-400">No tasks for today</div>
+                : todayList.map(task => (
+                    <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} canToggle />
+                  ))
+              }
             </Section>
 
             {/* This week */}
@@ -312,7 +403,7 @@ export default function TasksPage() {
               {thisWeek
                 .sort((a, b) => parseISO(a.dueDate!).getTime() - parseISO(b.dueDate!).getTime())
                 .map(task => (
-                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
+                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} fullDate canToggle={false} />
                 ))}
             </Section>
 
@@ -321,24 +412,24 @@ export default function TasksPage() {
               {upcoming
                 .sort((a, b) => parseISO(a.dueDate!).getTime() - parseISO(b.dueDate!).getTime())
                 .map(task => (
-                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
+                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} fullDate canToggle={false} />
                 ))}
             </Section>
 
             {/* No due date */}
             <Section icon={<Inbox className="w-3.5 h-3.5" />} title="No Due Date" count={noDate.length} accent="text-slate-400">
               {noDate.map(task => (
-                <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
+                <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} canToggle={false} />
               ))}
             </Section>
 
-            {/* Done — collapsible */}
+            {/* Done — collapsible, always allow unchecking */}
             <Section icon={<CheckSquare className="w-3.5 h-3.5" />} title="Done" count={done.length} accent="text-green-600" collapsible>
               {done
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
                 .slice(0, 10)
                 .map(task => (
-                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} />
+                  <TaskRow key={task.id} task={task} onToggle={() => toggleDone(task)} onEdit={() => openEdit(task)} onDelete={() => setDeleteId(task.id)} canToggle />
                 ))}
             </Section>
           </>
@@ -366,7 +457,7 @@ export default function TasksPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">Due Date</label>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">Task Date</label>
                   <input type="date" value={form.dueDate} onChange={e => setField('dueDate', e.target.value)} className={inputCls} />
                 </div>
                 <div>

@@ -34,7 +34,7 @@ export function LayoutWrapper({ children }: { children: React.ReactNode }) {
         <Menu className="w-4 h-4" />
       </button>
 
-      <main className="md:ml-60 min-h-screen">{children}</main>
+      <main className="md:ml-60 min-h-screen h-screen">{children}</main>
     </>
   )
 }

@@ -663,7 +663,7 @@ export default function ClientsPage() {
                                   onClick={e => { e.stopPropagation(); setContactClient(client) }}
                                   className="text-xs text-violet-500 hover:text-violet-700 font-medium mt-1 cursor-pointer"
                                 >
-                                  Show all →
+                                  see more
                                 </button>
                               </div>
                             )

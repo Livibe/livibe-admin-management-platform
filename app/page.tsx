@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Topbar } from '@/components/layout/topbar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { DollarSign, TrendingUp, Users, AlertTriangle, Clock, Calendar, ArrowRight, Loader2, CheckSquare } from 'lucide-react'
-import { format, differenceInDays, startOfDay, parseISO } from 'date-fns'
+import { differenceInDays } from 'date-fns'
 import Link from 'next/link'
 
 interface Deal {
@@ -54,9 +54,9 @@ const WHO_COLORS: Record<string, string> = {
 }
 
 function formatUSD(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000)     return `$${(n / 1_000).toFixed(0)}K`
-  return `$${n.toLocaleString()}`
+  if (n >= 1_000_000) return `฿${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000)     return `฿${(n / 1_000).toFixed(0)}K`
+  return `฿${n.toLocaleString()}`
 }
 
 export default function DashboardPage() {
@@ -96,32 +96,39 @@ export default function DashboardPage() {
     return differenceInDays(new Date(), updated) > 14 && d.stage !== 'close_won'
   })
 
-  // Upcoming event dates (all future, non-won/loss)
-  const today = startOfDay(new Date())
-  const upcomingApproach = deals
-    .filter(d => d.approachEndDate && !['close_won', 'close_loss'].includes(d.stage))
-    .filter(d => differenceInDays(startOfDay(parseISO(d.approachEndDate!)), today) >= 0)
-    .sort((a, b) => parseISO(a.approachEndDate!).getTime() - parseISO(b.approachEndDate!).getTime())
-    .slice(0, 6)
 
-  // Pipeline by stage (funnel)
-  const stageBreakdown = STAGES.map(s => ({
-    ...s,
-    count: deals.filter(d => d.stage === s.key).length,
-    value: deals.filter(d => d.stage === s.key).reduce((sum, d) => sum + Number(d.dealValue), 0),
-  }))
+  // Pipeline by stage — Lead Identified counts all deals (every deal starts there)
+  const stageBreakdown = STAGES.map(s => {
+    const matched = s.key === 'lead_identified'
+      ? deals
+      : deals.filter(d => d.stage === s.key)
+    return {
+      ...s,
+      count: matched.length,
+      value: matched.reduce((sum, d) => sum + Number(d.dealValue), 0),
+    }
+  })
   const maxFunnelCount = Math.max(...stageBreakdown.map(s => s.count), 1)
+
+  // Conversion rate of each stage vs Lead Identified (total)
+  const total = deals.length
+  const conversionSteps = STAGES.filter(s => s.key !== 'lead_identified').map(s => {
+    const count = deals.filter(d => d.stage === s.key).length
+    const rate  = total > 0 ? Math.round((count / total) * 100) : 0
+    return { key: s.key, label: s.label, color: s.color, count, rate }
+  })
 
   // Team performance by createdBy
   const creators = ['muan', 'japan', 'kla']
   const teamStats = creators.map(person => {
-    const personDeals  = deals.filter(d => d.createdBy === person)
-    const personActive = personDeals.filter(d => d.stage !== 'close_loss')
-    const personWon    = personDeals.filter(d => d.stage === 'close_won')
-    const value        = personActive.reduce((s, d) => s + Number(d.dealValue), 0)
-    const convRate     = personDeals.length > 0 ? Math.round((personWon.length / personDeals.length) * 100) : 0
-    return { person, dealCount: personActive.length, value, convRate }
-  }).filter(s => s.dealCount > 0 || s.value > 0)
+    const personDeals   = deals.filter(d => d.createdBy === person)
+    const personActive  = personDeals.filter(d => d.stage !== 'close_loss')
+    const personWon     = personDeals.filter(d => d.stage === 'close_won')
+    const value         = personActive.reduce((s, d) => s + Number(d.dealValue), 0)
+    const convRate      = personDeals.length > 0 ? Math.round((personWon.length / personDeals.length) * 100) : 0
+    const contactCount  = clients.filter(c => c.whoApproach?.toLowerCase() === person).length
+    return { person, dealCount: personActive.length, value, convRate, contactCount }
+  }).filter(s => s.dealCount > 0 || s.value > 0 || s.contactCount > 0)
 
   return (
     <div>
@@ -221,35 +228,29 @@ export default function DashboardPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-slate-400" />
-                    Event Dates
+                    Conversion Rates
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {upcomingApproach.length === 0 ? (
-                    <p className="text-xs text-slate-400">No upcoming approach deadlines.</p>
-                  ) : upcomingApproach.map(deal => {
-                    const daysUntil = differenceInDays(startOfDay(parseISO(deal.approachEndDate!)), today)
-                    const urgent = daysUntil <= 7
-                    return (
-                      <div key={deal.id} className="flex items-start justify-between hover:bg-slate-50 rounded-lg p-2 -mx-2 transition-colors">
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-slate-900 truncate">{deal.eventName}</p>
-                          <p className="text-xs text-slate-400 truncate">{deal.clientName}</p>
-                          {deal.createdBy && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium capitalize mt-0.5 inline-block ${WHO_COLORS[deal.createdBy] ?? 'bg-slate-100 text-slate-600'}`}>
-                              {deal.createdBy}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-right ml-2 shrink-0">
-                          <p className="text-xs font-medium text-slate-700">{format(parseISO(deal.approachEndDate!), 'MMM d')}</p>
-                          <p className={`text-xs font-medium ${urgent ? 'text-red-500' : 'text-slate-400'}`}>
-                            {daysUntil === 0 ? 'Today' : `${daysUntil}d`}
-                          </p>
-                        </div>
+                <CardContent className="space-y-3">
+                  {deals.length === 0 ? (
+                    <p className="text-xs text-slate-400">No pipeline data yet.</p>
+                  ) : conversionSteps.map(step => (
+                    <div key={step.key}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate-500">{step.label}</span>
+                        <span className={`text-xs font-semibold ${step.rate >= 50 ? 'text-green-600' : step.rate >= 25 ? 'text-amber-600' : 'text-red-500'}`}>
+                          {step.rate}%
+                        </span>
                       </div>
-                    )
-                  })}
+                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${step.rate >= 50 ? 'bg-green-500' : step.rate >= 25 ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ width: `${step.rate}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">{step.count} of {total} deals</p>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
             </div>
@@ -268,6 +269,7 @@ export default function DashboardPage() {
                       <thead>
                         <tr className="text-xs text-slate-400 border-b">
                           <th className="text-left pb-2 font-medium">Person</th>
+                          <th className="text-right pb-2 font-medium">Accounts</th>
                           <th className="text-right pb-2 font-medium">Active Deals</th>
                           <th className="text-right pb-2 font-medium">Pipeline Value</th>
                           <th className="text-right pb-2 font-medium">Win Rate</th>
@@ -275,7 +277,7 @@ export default function DashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {teamStats.map(({ person, dealCount, value, convRate }) => {
+                        {teamStats.map(({ person, dealCount, value, convRate, contactCount }) => {
                           const pct = totalPipeline > 0 ? (value / totalPipeline) * 100 : 0
                           return (
                             <tr key={person} className="hover:bg-slate-50">
@@ -287,6 +289,7 @@ export default function DashboardPage() {
                                   <p className="font-medium text-slate-900 text-xs capitalize">{person}</p>
                                 </div>
                               </td>
+                              <td className="py-3 text-right text-slate-700 text-xs">{contactCount}</td>
                               <td className="py-3 text-right text-slate-700 text-xs">{dealCount}</td>
                               <td className="py-3 text-right font-medium text-slate-900 text-xs">{formatUSD(value)}</td>
                               <td className="py-3 text-right">
