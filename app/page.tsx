@@ -96,19 +96,18 @@ export default function DashboardPage() {
     return differenceInDays(new Date(), updated) > 14 && d.stage !== 'close_won'
   })
 
-
-  // Pipeline by stage — Lead Identified counts all deals (every deal starts there)
+  // Pipeline funnel — each stage is cumulative (deals at this stage OR further along)
+  const STAGE_ORDER = ['lead_identified', 'contacted', 'meeting_scheduled', 'proposal_in_negotiation', 'close_won', 'close_loss']
   const stageBreakdown = STAGES.map(s => {
-    const matched = s.key === 'lead_identified'
-      ? deals
-      : deals.filter(d => d.stage === s.key)
+    const stageIdx = STAGE_ORDER.indexOf(s.key)
+    const inOrPast = deals.filter(d => STAGE_ORDER.indexOf(d.stage) >= stageIdx)
     return {
       ...s,
-      count: matched.length,
-      value: matched.reduce((sum, d) => sum + Number(d.dealValue), 0),
+      count: inOrPast.length,
+      value: inOrPast.reduce((sum, d) => sum + Number(d.dealValue), 0),
     }
   })
-  const maxFunnelCount = Math.max(...stageBreakdown.map(s => s.count), 1)
+  const maxFunnelCount = Math.max(stageBreakdown[0]?.count ?? 0, 1)
 
   // Conversion rate of each stage vs Lead Identified (total)
   const total = deals.length
