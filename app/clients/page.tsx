@@ -5,6 +5,12 @@ import { createPortal } from 'react-dom'
 import { Topbar } from '@/components/layout/topbar'
 import { Plus, X, Loader2, Search, Phone, Mail, ChevronDown, Building2, ChevronLeft, ChevronRight, MoreHorizontal, Pencil, Trash2, Download, ExternalLink, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 
+interface Deal {
+  id: string
+  clientName: string
+  stage: string
+}
+
 interface Client {
   id: string
   companyName: string
@@ -60,6 +66,35 @@ const WHO_OPTIONS = [
 
 const PAGE_SIZE = 15
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+
+const STAGE_LABELS: Record<string, string> = {
+  lead_identified:          'Lead Identified',
+  contacted:                'Contacted',
+  meeting_scheduled:        'Meeting Scheduled',
+  proposal_in_negotiation:  'Negotiation',
+  close_won:                'Close Won',
+  close_loss:               'Close Loss',
+}
+const STAGE_BADGE: Record<string, string> = {
+  lead_identified:          'bg-slate-100 text-slate-600',
+  contacted:                'bg-blue-100 text-blue-700',
+  meeting_scheduled:        'bg-violet-100 text-violet-700',
+  proposal_in_negotiation:  'bg-amber-100 text-amber-700',
+  close_won:                'bg-green-100 text-green-700',
+  close_loss:               'bg-red-100 text-red-500',
+}
+const STAGE_RANK: Record<string, number> = {
+  close_won: 6, proposal_in_negotiation: 5, meeting_scheduled: 4,
+  contacted: 3, lead_identified: 2, close_loss: 1,
+}
+const STAGE_OPTIONS = [
+  { value: 'lead_identified',         label: 'Lead Identified' },
+  { value: 'contacted',               label: 'Contacted' },
+  { value: 'meeting_scheduled',       label: 'Meeting Scheduled' },
+  { value: 'proposal_in_negotiation', label: 'Negotiation' },
+  { value: 'close_won',               label: 'Close Won' },
+  { value: 'close_loss',              label: 'Close Loss' },
+]
 
 const EMPTY_FORM = {
   companyName: '', industry: '', country: 'Thailand', website: '', notes: '',
@@ -374,14 +409,16 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [deals, setDeals] = useState<Deal[]>([])
   const [filterIndustry, setFilterIndustry] = useState('')
   const [filterWho, setFilterWho] = useState('')
-  const [sortField, setSortField] = useState<'companyName' | 'country' | 'industry' | 'whoApproach' | ''>('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [sortField, setSortField] = useState<'companyName' | 'country' | 'industry' | 'whoApproach' | 'status' | ''>('')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [contactClient, setContactClient] = useState<typeof clients[0] | null>(null)
   const [page, setPage] = useState(1)
 
-  function handleSort(field: 'companyName' | 'country' | 'industry' | 'whoApproach') {
+  function handleSort(field: 'companyName' | 'country' | 'industry' | 'whoApproach' | 'status') {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     } else {
@@ -402,9 +439,13 @@ export default function ClientsPage() {
   const fetchClients = useCallback(async () => {
     try {
       setError(null)
-      const res = await fetch(`${API_URL}/clients`)
-      if (!res.ok) throw new Error()
-      setClients(await res.json())
+      const [cr, dr] = await Promise.all([
+        fetch(`${API_URL}/clients`),
+        fetch(`${API_URL}/deals`),
+      ])
+      if (!cr.ok) throw new Error()
+      setClients(await cr.json())
+      if (dr.ok) setDeals(await dr.json())
     } catch {
       setError('Could not connect to backend.')
     } finally {
@@ -518,6 +559,15 @@ export default function ClientsPage() {
     new Set(clients.map(c => c.industry).filter(Boolean) as string[])
   ).sort()
 
+  // Pipeline status per client — most advanced stage
+  const pipelineStatus: Record<string, string> = {}
+  deals.forEach(d => {
+    const current = pipelineStatus[d.clientName]
+    if (!current || (STAGE_RANK[d.stage] ?? 0) > (STAGE_RANK[current] ?? 0)) {
+      pipelineStatus[d.clientName] = d.stage
+    }
+  })
+
   // Filter + paginate
   const filtered = clients.filter(c => {
     const q = search.toLowerCase()
@@ -527,13 +577,21 @@ export default function ClientsPage() {
       c.industry?.toLowerCase().includes(q)
     const matchIndustry = !filterIndustry || c.industry === filterIndustry
     const matchWho = !filterWho || c.whoApproach === filterWho
-    return matchSearch && matchIndustry && matchWho
+    const matchStatus = !filterStatus || pipelineStatus[c.companyName] === filterStatus
+    return matchSearch && matchIndustry && matchWho && matchStatus
   })
   const sorted = sortField
     ? [...filtered].sort((a, b) => {
-        const av = (a[sortField] ?? '').toLowerCase()
-        const bv = (b[sortField] ?? '').toLowerCase()
-        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
+        const av = sortField === 'status'
+          ? (STAGE_RANK[pipelineStatus[a.companyName]] ?? 0)
+          : (a[sortField as keyof Client] ?? '').toString().toLowerCase()
+        const bv = sortField === 'status'
+          ? (STAGE_RANK[pipelineStatus[b.companyName]] ?? 0)
+          : (b[sortField as keyof Client] ?? '').toString().toLowerCase()
+        if (typeof av === 'number' && typeof bv === 'number') {
+          return sortDir === 'asc' ? av - bv : bv - av
+        }
+        return sortDir === 'asc' ? (av as string).localeCompare(bv as string) : (bv as string).localeCompare(av as string)
       })
     : filtered
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
@@ -573,10 +631,17 @@ export default function ClientsPage() {
               placeholder="All Key Contacts"
               options={WHO_OPTIONS.map(o => ({ ...o, avatar: true }))}
             />
+            {/* Pipeline status filter */}
+            <FilterSelect
+              value={filterStatus}
+              onChange={v => { setFilterStatus(v); setPage(1) }}
+              placeholder="All Statuses"
+              options={STAGE_OPTIONS}
+            />
             {/* Clear filters */}
-            {(filterIndustry || filterWho) && (
+            {(filterIndustry || filterWho || filterStatus) && (
               <button
-                onClick={() => { setFilterIndustry(''); setFilterWho(''); setPage(1) }}
+                onClick={() => { setFilterIndustry(''); setFilterWho(''); setFilterStatus(''); setPage(1) }}
                 className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" /> Clear
@@ -627,7 +692,12 @@ export default function ClientsPage() {
                         )
                       })}
                       <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500">Contact</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 w-52">Note</th>
+                      <th onClick={() => handleSort('status')}
+                        className="text-left px-4 py-3 text-xs font-semibold text-slate-500 cursor-pointer select-none hover:text-slate-700">
+                        <span className="flex items-center gap-1">Status
+                          {sortField === 'status' ? (sortDir === 'asc' ? <ArrowUp className="w-3 h-3 shrink-0" /> : <ArrowDown className="w-3 h-3 shrink-0" />) : <ArrowUpDown className="w-3 h-3 shrink-0" />}
+                        </span>
+                      </th>
                       <th onClick={() => handleSort('whoApproach')}
                         className="text-left px-4 py-3 text-xs font-semibold text-slate-500 cursor-pointer select-none hover:text-slate-700">
                         <span className="flex items-center gap-1">Key Contact
@@ -669,10 +739,12 @@ export default function ClientsPage() {
                             )
                           })()}
                         </td>
-                        {/* Note */}
-                        <td className="px-4 py-3 max-w-50">
-                          {client.notes
-                            ? <p className="text-xs text-slate-500 line-clamp-3 whitespace-pre-line">{client.notes}</p>
+                        {/* Pipeline Status */}
+                        <td className="px-4 py-3">
+                          {pipelineStatus[client.companyName]
+                            ? <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STAGE_BADGE[pipelineStatus[client.companyName]] ?? 'bg-slate-100 text-slate-600'}`}>
+                                {STAGE_LABELS[pipelineStatus[client.companyName]]}
+                              </span>
                             : <span className="text-xs text-slate-300">—</span>
                           }
                         </td>
@@ -702,22 +774,43 @@ export default function ClientsPage() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
                   <p className="text-xs text-slate-400">
-                    {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                    Showing <span className="font-medium text-slate-600">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)}</span> of <span className="font-medium text-slate-600">{sorted.length}</span>
                   </p>
                   <div className="flex items-center gap-1">
+                    <button onClick={() => setPage(1)} disabled={page === 1}
+                      className="px-2.5 h-8 text-xs font-medium rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+                      First
+                    </button>
                     <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
                       <ChevronLeft className="w-3.5 h-3.5" />
                     </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                      <button key={p} onClick={() => setPage(p)}
-                        className={`w-7 h-7 text-xs font-medium rounded-lg transition-colors cursor-pointer ${p === page ? 'bg-violet-600 text-white' : 'border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-                        {p}
-                      </button>
-                    ))}
+                    {(() => {
+                      const pages: (number | '...')[] = []
+                      if (totalPages <= 7) {
+                        for (let i = 1; i <= totalPages; i++) pages.push(i)
+                      } else {
+                        pages.push(1)
+                        if (page > 3) pages.push('...')
+                        for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i)
+                        if (page < totalPages - 2) pages.push('...')
+                        pages.push(totalPages)
+                      }
+                      return pages.map((p, i) => p === '...'
+                        ? <span key={`e${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-slate-400">…</span>
+                        : <button key={p} onClick={() => setPage(p as number)}
+                            className={`w-8 h-8 text-xs font-medium rounded-lg transition-colors cursor-pointer ${p === page ? 'bg-violet-600 text-white shadow-sm' : 'border border-slate-200 text-slate-500 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200'}`}>
+                            {p}
+                          </button>
+                      )
+                    })()}
                     <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+                      className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
                       <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
+                      className="px-2.5 h-8 text-xs font-medium rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+                      Last
                     </button>
                   </div>
                 </div>
@@ -910,6 +1003,12 @@ export default function ClientsPage() {
                 )}
               </div>
             </div>
+            {contactClient.notes && (
+              <div className="px-5 pb-5 border-t border-slate-100 pt-4">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Notes</p>
+                <p className="text-xs text-slate-600 whitespace-pre-line">{contactClient.notes}</p>
+              </div>
+            )}
           </div>
         </div>
       )}

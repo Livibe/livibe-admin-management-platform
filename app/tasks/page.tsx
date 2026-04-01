@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Topbar } from '@/components/layout/topbar'
 import { Plus, X, Loader2, CheckSquare, Square, AlertTriangle, Pencil, Trash2, RefreshCw, Calendar, Clock, Inbox, ChevronDown } from 'lucide-react'
 import { format, isToday, isBefore, differenceInDays, parseISO, startOfDay } from 'date-fns'
@@ -46,6 +47,80 @@ const EMPTY_FORM = {
 }
 
 // ── Filter select ─────────────────────────────────────────────────────────────
+// Form-use avatar select (same portal dropdown as FilterSelect but full-width)
+function AvatarSelect({
+  value, onChange, options, placeholder = '— Unassigned',
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const selected = options.find(o => o.value === value)
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        btnRef.current && !btnRef.current.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  function handleOpen() {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <div className="relative">
+      <button ref={btnRef} type="button" onClick={handleOpen}
+        className="w-full flex items-center gap-2 text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-400 transition-all cursor-pointer">
+        {selected ? (
+          <>
+            <span className={`w-5 h-5 rounded-full ${AVATAR_COLORS[selected.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}>
+              {selected.label.charAt(0).toUpperCase()}
+            </span>
+            <span className="text-slate-800 flex-1 text-left text-sm">{selected.label}</span>
+          </>
+        ) : (
+          <span className="text-slate-400 flex-1 text-left text-sm">{placeholder}</span>
+        )}
+        <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+      </button>
+      {open && createPortal(
+        <div ref={menuRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
+          className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden py-1">
+          <button type="button" onMouseDown={() => { onChange(''); setOpen(false) }}
+            className="w-full flex items-center px-3 py-2 text-sm text-slate-400 hover:bg-slate-50 transition-colors cursor-pointer">
+            {placeholder}
+          </button>
+          {options.map(o => (
+            <button key={o.value} type="button" onMouseDown={() => { onChange(o.value); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors cursor-pointer ${value === o.value ? 'bg-violet-50 text-violet-700 font-medium' : 'text-slate-700 hover:bg-violet-50 hover:text-violet-700'}`}>
+              <span className={`w-5 h-5 rounded-full ${AVATAR_COLORS[o.value] ?? 'bg-slate-400'} flex items-center justify-center text-white text-[10px] font-bold shrink-0`}>
+                {o.label.charAt(0).toUpperCase()}
+              </span>
+              {o.label}
+              {value === o.value && <span className="ml-auto text-violet-500">✓</span>}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
 function FilterSelect({
   value, onChange, options, placeholder,
 }: {
@@ -471,14 +546,11 @@ export default function TasksPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">Assigned To</label>
-                <div className="flex gap-2">
-                  {ASSIGNEE_OPTIONS.map(o => (
-                    <button key={o.value} type="button" onClick={() => setField('assignedTo', o.value)}
-                      className={`flex-1 text-xs py-2 rounded-lg border font-medium transition-colors cursor-pointer ${form.assignedTo === o.value ? 'bg-violet-600 text-white border-violet-600' : 'border-slate-200 text-slate-600 hover:border-violet-300'}`}>
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
+                <AvatarSelect
+                  value={form.assignedTo}
+                  onChange={v => setField('assignedTo', v)}
+                  options={ASSIGNEE_OPTIONS}
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
